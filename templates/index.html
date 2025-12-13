@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duplicate Media Finder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .directory-selector {
+            margin-bottom: 30px;
+        }
+
+        .directory-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .scan-button {
+            width: 100%;
+            padding: 14px;
+            font-size: 18px;
+            margin-top: 10px;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border-left: 4px solid #1976d2;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results {
+            margin-top: 30px;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+        }
+
+        .results-title {
+            font-size: 1.5em;
+            color: #333;
+        }
+
+        .stats {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .duplicate-group {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .group-title {
+            font-weight: 600;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .group-count {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.9em;
+        }
+
+        .file-list {
+            list-style: none;
+        }
+
+        .file-item {
+            background: white;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .file-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .file-link-container {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-link {
+            color: #667eea;
+            text-decoration: none;
+            word-break: break-all;
+            display: block;
+            cursor: pointer;
+        }
+
+        .file-link:hover {
+            text-decoration: underline;
+        }
+
+        .delete-button {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+
+        .delete-button:hover {
+            background: #c82333;
+        }
+
+        .delete-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .file-path {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #555;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .section-title {
+            font-size: 1.3em;
+            color: #333;
+            margin: 30px 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+
+        .near-duplicate-group {
+            background: #fff3e0;
+            border-left-color: #ff9800;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Duplicate Media Finder</h1>
+        <p class="subtitle">Scan your directories to find duplicate images and videos</p>
+
+        <div class="directory-selector">
+            <div class="directory-input-group">
+                <input type="text" id="directoryInput" placeholder="Enter directory path, or click 'Choose Directory' to browse" onkeydown="if(event.key==='Enter') scanDirectory()">
+                <button onclick="chooseDirectory()">Choose Directory</button>
+            </div>
+            <button class="scan-button" onclick="scanDirectory()" id="scanButton">Scan for Duplicates</button>
+        </div>
+
+        <div class="status" id="status"></div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Scanning directory... This may take a while for large directories.</p>
+        </div>
+
+        <div class="results" id="results" style="display: none;">
+            <div class="results-header">
+                <h2 class="results-title">Scan Results</h2>
+                <div class="stats" id="stats"></div>
+            </div>
+
+            <div id="exactDuplicates"></div>
+            <div id="nearDuplicates"></div>
+        </div>
+    </div>
+
+    <script>
+        async function chooseDirectory() {
+            console.log('[DEBUG] chooseDirectory called - requesting native folder picker from backend');
+            
+            showStatus('Opening folder picker...', 'info');
+            
+            try {
+                // Call backend endpoint to open native folder picker
+                const response = await fetch('http://127.0.0.1:5000/api/choose-directory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                console.log('[DEBUG] Backend response:', data);
+                
+                if (response.ok && data.directory) {
+                    const directory = data.directory;
+                    console.log('[DEBUG] Received directory from backend:', directory);
+                    
+                    // Update textbox with the selected directory
+                    console.log('[DEBUG] Updating textbox with path:', directory);
+                    document.getElementById('directoryInput').value = directory;
+                    console.log('[DEBUG] Textbox value after update:', document.getElementById('directoryInput').value);
+                    
+                    showStatus(`Directory selected: ${directory}`, 'success');
+                } else {
+                    // User cancelled or error
+                    if (data.error) {
+                        console.log('[DEBUG] Backend returned error:', data.error);
+                        if (data.error === 'No directory selected') {
+                            showStatus('Directory selection cancelled', 'info');
+                        } else {
+                            showStatus('Error: ' + data.error, 'error');
+                        }
+                    } else {
+                        console.log('[DEBUG] No directory in response - user likely cancelled');
+                        showStatus('Directory selection cancelled', 'info');
+                    }
+                }
+            } catch (error) {
+                console.log('[DEBUG] Error calling choose-directory endpoint:', error);
+                showStatus('Error opening folder picker. Please enter the path manually.', 'error');
+            }
+        }
+
+        async function scanDirectory() {
+            // Always read from textbox - never use cached values
+            const directory = document.getElementById('directoryInput').value.trim();
+            console.log('[DEBUG] scanDirectory called with textbox value:', directory);
+            
+            if (!directory) {
+                showStatus('Please select a directory first.', 'error');
+                return;
+            }
+
+            // Show loading state
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('scanButton').disabled = true;
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/scan', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ directory: directory })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Scan failed');
+                }
+
+                displayResults(data);
+
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('scanButton').disabled = false;
+            }
+        }
+
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            const exactDuplicatesDiv = document.getElementById('exactDuplicates');
+            const nearDuplicatesDiv = document.getElementById('nearDuplicates');
+            const statsDiv = document.getElementById('stats');
+
+            // Clear previous results
+            exactDuplicatesDiv.innerHTML = '';
+            nearDuplicatesDiv.innerHTML = '';
+
+            // Display stats
+            statsDiv.textContent = `${data.total_files} files scanned | ${data.total_duplicate_groups} exact duplicate groups | ${data.total_near_duplicate_groups} near-duplicate groups`;
+
+            // Display exact duplicates
+            if (data.duplicates && data.duplicates.length > 0) {
+                const sectionTitle = document.createElement('h3');
+                sectionTitle.className = 'section-title';
+                sectionTitle.textContent = 'Exact Duplicates (Same Hash)';
+                exactDuplicatesDiv.appendChild(sectionTitle);
+
+                data.duplicates.forEach((group, index) => {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = 'duplicate-group';
+                    
+                    const header = document.createElement('div');
+                    header.className = 'group-header';
+                    header.innerHTML = `
+                        <span class="group-title">Duplicate Group ${index + 1}</span>
+                        <span class="group-count">${group.count} files</span>
+                    `;
+                    groupDiv.appendChild(header);
+
+                    const fileList = document.createElement('ul');
+                    fileList.className = 'file-list';
+                    
+                    group.files.forEach(filePath => {
+                        const fileItem = document.createElement('li');
+                        fileItem.className = 'file-item';
+                        
+                        const linkContainer = document.createElement('div');
+                        linkContainer.className = 'file-link-container';
+                        
+                        const fileLink = document.createElement('a');
+                        // Create proper file:// URL
+                        let fileUrl = createFileUrl(filePath);
+                        fileLink.href = fileUrl;
+                        fileLink.target = '_blank';
+                        fileLink.className = 'file-link';
+                        fileLink.textContent = filePath;
+                        fileLink.onclick = function(e) {
+                            e.preventDefault();
+                            // Try multiple methods to open the file
+                            openFile(filePath, fileUrl);
+                        };
+                        
+                        linkContainer.appendChild(fileLink);
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'delete-button';
+                        deleteBtn.textContent = 'Delete';
+                        deleteBtn.onclick = function() {
+                            deleteFile(filePath, fileItem);
+                        };
+                        
+                        fileItem.appendChild(linkContainer);
+                        fileItem.appendChild(deleteBtn);
+                        fileList.appendChild(fileItem);
+                    });
+                    
+                    groupDiv.appendChild(fileList);
+                    exactDuplicatesDiv.appendChild(groupDiv);
+                });
+            } else {
+                exactDuplicatesDiv.innerHTML = '<div class="no-results">No exact duplicates found.</div>';
+            }
+
+            // Display near-duplicates
+            if (data.near_duplicates && data.near_duplicates.length > 0) {
+                const sectionTitle = document.createElement('h3');
+                sectionTitle.className = 'section-title';
+                sectionTitle.textContent = 'Near Duplicates (Similar Images)';
+                nearDuplicatesDiv.appendChild(sectionTitle);
+
+                data.near_duplicates.forEach((group, index) => {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = 'duplicate-group near-duplicate-group';
+                    
+                    const header = document.createElement('div');
+                    header.className = 'group-header';
+                    header.innerHTML = `
+                        <span class="group-title">Near-Duplicate Group ${index + 1}</span>
+                        <span class="group-count">${group.count} files</span>
+                    `;
+                    groupDiv.appendChild(header);
+
+                    const fileList = document.createElement('ul');
+                    fileList.className = 'file-list';
+                    
+                    group.files.forEach(filePath => {
+                        const fileItem = document.createElement('li');
+                        fileItem.className = 'file-item';
+                        
+                        const linkContainer = document.createElement('div');
+                        linkContainer.className = 'file-link-container';
+                        
+                        const fileLink = document.createElement('a');
+                        // Create proper file:// URL
+                        let fileUrl = createFileUrl(filePath);
+                        fileLink.href = fileUrl;
+                        fileLink.target = '_blank';
+                        fileLink.className = 'file-link';
+                        fileLink.textContent = filePath;
+                        fileLink.onclick = function(e) {
+                            e.preventDefault();
+                            // Try multiple methods to open the file
+                            openFile(filePath, fileUrl);
+                        };
+                        
+                        linkContainer.appendChild(fileLink);
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'delete-button';
+                        deleteBtn.textContent = 'Delete';
+                        deleteBtn.onclick = function() {
+                            deleteFile(filePath, fileItem);
+                        };
+                        
+                        fileItem.appendChild(linkContainer);
+                        fileItem.appendChild(deleteBtn);
+                        fileList.appendChild(fileItem);
+                    });
+                    
+                    groupDiv.appendChild(fileList);
+                    nearDuplicatesDiv.appendChild(groupDiv);
+                });
+            } else {
+                nearDuplicatesDiv.innerHTML = '<div class="no-results">No near-duplicates found.</div>';
+            }
+
+            resultsDiv.style.display = 'block';
+            showStatus(`Scan complete! Found ${data.total_duplicate_groups} exact duplicate groups and ${data.total_near_duplicate_groups} near-duplicate groups.`, 'success');
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + type;
+            statusDiv.style.display = 'block';
+        }
+
+        function createFileUrl(filePath) {
+            // Convert Windows path to proper file:// URL
+            let normalizedPath = filePath.replace(/\\/g, '/');
+            
+            // Handle Windows absolute paths (C:\...)
+            if (normalizedPath.match(/^[A-Z]:/)) {
+                // Windows path: C:/path/to/file.jpg -> file:///C:/path/to/file.jpg
+                return 'file:///' + normalizedPath;
+            }
+            
+            // Handle Unix-style paths
+            if (normalizedPath.startsWith('/')) {
+                return 'file://' + normalizedPath;
+            }
+            
+            // Default: assume relative or add file:///
+            return 'file:///' + normalizedPath;
+        }
+
+        async function openFile(filePath, fileUrl) {
+            // Method 1: Try opening via backend endpoint (most reliable)
+            try {
+                // Encode the file path for URL
+                const encodedPath = encodeURIComponent(filePath);
+                const backendUrl = `http://127.0.0.1:5000/api/open-file?path=${encodedPath}`;
+                
+                // Open in new tab - browser will handle the MIME type
+                window.open(backendUrl, '_blank');
+                return;
+            } catch (err) {
+                console.log('Backend file open failed:', err);
+            }
+            
+            // Method 2: Try direct file:// URL (may be blocked by browser)
+            try {
+                const link = document.createElement('a');
+                link.href = fileUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Also try window.open as fallback
+                setTimeout(() => {
+                    try {
+                        window.open(fileUrl, '_blank');
+                    } catch (e) {
+                        console.log('window.open also failed');
+                    }
+                }, 100);
+            } catch (err) {
+                console.log('Direct file:// open failed:', err);
+                // Method 3: Final fallback - show error
+                alert('Could not open file. The file may be blocked by browser security settings.\n\nFile: ' + filePath + '\n\nYou can try copying the path and opening it manually.');
+            }
+        }
+
+        async function deleteFile(filePath, fileItem) {
+            if (!confirm(`Are you sure you want to delete this file?\n\n${filePath}`)) {
+                return;
+            }
+            
+            const deleteBtn = fileItem.querySelector('.delete-button');
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Deleting...';
+            
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/delete-file', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ file_path: filePath })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Delete failed');
+                }
+                
+                // Remove the file item from the DOM
+                fileItem.style.opacity = '0.5';
+                fileItem.style.textDecoration = 'line-through';
+                deleteBtn.textContent = 'Deleted';
+                deleteBtn.style.background = '#28a745';
+                
+                showStatus(`File deleted: ${filePath}`, 'success');
+                
+                // Optionally remove from DOM after a delay
+                setTimeout(() => {
+                    fileItem.remove();
+                }, 2000);
+                
+            } catch (error) {
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = 'Delete';
+                showStatus('Error deleting file: ' + error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
+
