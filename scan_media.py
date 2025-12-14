@@ -9,7 +9,6 @@ computes SHA-256 hashes, detects duplicates, and generates a CSV report.
 import os
 import sys
 import hashlib
-import csv
 import argparse
 import shutil
 from pathlib import Path
@@ -322,69 +321,37 @@ def add_duplicate_group_ids(files_data):
     return files_data
 
 
-def write_csv_report(files_data, output_file='media_report.csv'):
+def move_duplicates(files_data, duplicates, root_directory, destination_folder=None):
     """
-    Write file information to CSV report.
-    
-    Args:
-        files_data: List of file information dictionaries
-        output_file: Output CSV file path
-    """
-    # Calculate total duplicate files (extra copies only, not originals)
-    total_files = len(files_data)
-    unique_hashes = len(set(f['hash'] for f in files_data))
-    total_duplicate_files = total_files - unique_hashes
-    
-    with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['file_path', 'file_size_bytes', 'file_type', 'hash', 'phash', 'duplicate_group_id', 'near_duplicate_group_id']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        writer.writeheader()
-        for file_info in files_data:
-            writer.writerow(file_info)
-        
-        # Add summary row
-        writer.writerow({
-            'file_path': 'TOTAL_DUPLICATE_FILES',
-            'file_size_bytes': '',
-            'file_type': '',
-            'hash': '',
-            'phash': '',
-            'duplicate_group_id': total_duplicate_files,
-            'near_duplicate_group_id': ''
-        })
-    
-    print(f"\nCSV report written to: {output_file}")
-
-
-def move_duplicates(files_data, duplicates, root_directory):
-    """
-    Move duplicate files to duplicates_review folder.
+    Move duplicate files to destination folder, preserving relative folder structure.
     For each duplicate group, keeps the first file as original and moves the rest.
     
     Args:
         files_data: List of file information dictionaries
         duplicates: Dictionary of duplicate groups (hash -> list of paths)
-        root_directory: Root directory where duplicates_review folder will be created
+        root_directory: Root directory that was scanned (for computing relative paths)
+        destination_folder: Destination folder path (default: duplicates_review/ next to root_directory)
     
     Returns:
-        Tuple of (num_duplicate_groups, num_duplicates_moved, duplicates_review_path)
+        Tuple of (num_duplicate_groups, num_duplicates_moved, destination_path, errors)
+        where errors is a list of error messages
     """
-    root_directory = Path(root_directory)
-    duplicates_review_path = root_directory / 'duplicates_review'
+    root_directory = Path(root_directory).resolve()
     
-    # Create duplicates_review folder if it doesn't exist
-    if not duplicates_review_path.exists():
-        duplicates_review_path.mkdir(parents=True, exist_ok=True)
-        print(f"\nCreated folder: {duplicates_review_path}")
+    # Determine destination folder
+    if destination_folder:
+        destination_path = Path(destination_folder).resolve()
     else:
-        print(f"\nUsing existing folder: {duplicates_review_path}")
+        # Default: duplicates_review/ next to the scanned directory
+        destination_path = root_directory.parent / 'duplicates_review'
+    
+    # Create destination folder if it doesn't exist
+    if not destination_path.exists():
+        destination_path.mkdir(parents=True, exist_ok=True)
     
     num_duplicate_groups = len(duplicates)
     num_duplicates_moved = 0
-    
-    # Create a mapping of file paths to file info for quick lookup
-    file_info_map = {f['file_path']: f for f in files_data}
+    errors = []
     
     # Process each duplicate group
     for hash_value, file_paths in duplicates.items():
@@ -396,35 +363,48 @@ def move_duplicates(files_data, duplicates, root_directory):
         # Move each duplicate file
         for duplicate_path in duplicate_paths:
             try:
-                source_path = Path(duplicate_path)
+                source_path = Path(duplicate_path).resolve()
                 if not source_path.exists():
-                    print(f"Warning: File not found: {duplicate_path}", file=sys.stderr)
+                    errors.append(f"File not found: {duplicate_path}")
                     continue
                 
-                # Get the filename
-                filename = source_path.name
-                destination_path = duplicates_review_path / filename
+                # Check if file is within root_directory to compute relative path
+                try:
+                    relative_path = source_path.relative_to(root_directory)
+                    # Preserve folder structure
+                    destination_file_path = destination_path / relative_path
+                except ValueError:
+                    # File is outside root_directory, just use filename
+                    destination_file_path = destination_path / source_path.name
+                
+                # Create parent directories if needed
+                destination_file_path.parent.mkdir(parents=True, exist_ok=True)
                 
                 # Handle filename conflicts by appending _1, _2, etc.
-                if destination_path.exists():
-                    stem = source_path.stem
-                    suffix = source_path.suffix
+                if destination_file_path.exists():
+                    stem = destination_file_path.stem
+                    suffix = destination_file_path.suffix
                     counter = 1
-                    while destination_path.exists():
+                    while destination_file_path.exists():
                         new_filename = f"{stem}_{counter}{suffix}"
-                        destination_path = duplicates_review_path / new_filename
+                        destination_file_path = destination_file_path.parent / new_filename
                         counter += 1
                 
                 # Move the file
-                shutil.move(str(source_path), str(destination_path))
-                print(f"Moved: {duplicate_path} -> {destination_path}")
+                shutil.move(str(source_path), str(destination_file_path))
                 num_duplicates_moved += 1
                 
-            except (OSError, IOError, shutil.Error) as e:
-                print(f"Error moving {duplicate_path}: {e}", file=sys.stderr)
-                continue
+            except PermissionError as e:
+                error_msg = f"Permission denied: {duplicate_path} - {str(e)}"
+                errors.append(error_msg)
+            except OSError as e:
+                error_msg = f"File locked or error: {duplicate_path} - {str(e)}"
+                errors.append(error_msg)
+            except Exception as e:
+                error_msg = f"Unexpected error moving {duplicate_path}: {str(e)}"
+                errors.append(error_msg)
     
-    return num_duplicate_groups, num_duplicates_moved, duplicates_review_path
+    return num_duplicate_groups, num_duplicates_moved, destination_path, errors
 
 
 def print_summary(files_data, duplicates, move_results=None):
@@ -466,13 +446,19 @@ def print_summary(files_data, duplicates, move_results=None):
     
     # Print move summary if duplicates were moved
     if move_results:
-        num_groups, num_moved, review_path = move_results
+        num_groups, num_moved, review_path, errors = move_results
         print("\n" + "="*60)
         print("DUPLICATE MOVE SUMMARY")
         print("="*60)
         print(f"Number of duplicate groups: {num_groups}")
         print(f"Number of duplicates moved: {num_moved}")
         print(f"Duplicates review folder:   {review_path}")
+        if errors:
+            print(f"\nErrors encountered ({len(errors)}):")
+            for error in errors[:10]:  # Show first 10 errors
+                print(f"  - {error}")
+            if len(errors) > 10:
+                print(f"  ... and {len(errors) - 10} more errors")
         print("="*60)
 
 
@@ -487,10 +473,10 @@ def main():
         help='Directory path to scan recursively'
     )
     parser.add_argument(
-        '-o', '--output',
+        '-d', '--destination',
         type=str,
-        default='media_report.csv',
-        help='Output CSV file name (default: media_report.csv)'
+        default=None,
+        help='Destination folder for duplicates (default: duplicates_review/ next to scanned directory)'
     )
     
     args = parser.parse_args()
@@ -511,13 +497,10 @@ def main():
     # Find duplicates
     duplicates = find_duplicates(files_data)
     
-    # Write CSV report (before moving files to preserve original paths)
-    write_csv_report(files_data, args.output)
-    
-    # Move duplicates to duplicates_review folder
+    # Move duplicates to destination folder
     move_results = None
     if duplicates:
-        move_results = move_duplicates(files_data, duplicates, args.directory)
+        move_results = move_duplicates(files_data, duplicates, args.directory, args.destination)
     
     # Print summary
     print_summary(files_data, duplicates, move_results)

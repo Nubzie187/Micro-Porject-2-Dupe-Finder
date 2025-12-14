@@ -15,7 +15,8 @@ from scan_media import (
     scan_directory,
     find_duplicates,
     add_duplicate_group_ids,
-    add_near_duplicate_group_ids
+    add_near_duplicate_group_ids,
+    move_duplicates
 )
 
 app = Flask(__name__)
@@ -250,6 +251,14 @@ def scan():
         # Find duplicates
         duplicates = find_duplicates(files_data)
         
+        # Get destination folder from request (optional)
+        destination_folder = data.get('destination_folder')
+        
+        # Move duplicates if any are found
+        move_results = None
+        if duplicates:
+            move_results = move_duplicates(files_data, duplicates, str(directory_path), destination_folder)
+        
         # Format duplicates for frontend
         duplicate_groups = []
         for hash_value, file_paths in duplicates.items():
@@ -278,13 +287,26 @@ def scan():
                     'count': len(file_paths)
                 })
         
-        return jsonify({
+        # Prepare response
+        response_data = {
             'duplicates': duplicate_groups,
             'near_duplicates': near_duplicate_list,
             'total_files': len(files_data),
             'total_duplicate_groups': len(duplicate_groups),
             'total_near_duplicate_groups': len(near_duplicate_list)
-        })
+        }
+        
+        # Add move summary if duplicates were moved
+        if move_results:
+            num_groups, num_moved, destination_path, errors = move_results
+            response_data['move_summary'] = {
+                'num_duplicate_groups': num_groups,
+                'num_files_moved': num_moved,
+                'destination_folder': str(destination_path),
+                'errors': errors
+            }
+        
+        return jsonify(response_data)
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500

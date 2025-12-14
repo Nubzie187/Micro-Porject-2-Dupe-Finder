@@ -287,6 +287,10 @@
                 <input type="text" id="directoryInput" placeholder="Enter directory path, or click 'Choose Directory' to browse" onkeydown="if(event.key==='Enter') scanDirectory()">
                 <button onclick="chooseDirectory()">Choose Directory</button>
             </div>
+            <div class="directory-input-group" style="margin-top: 10px;">
+                <input type="text" id="destinationInput" placeholder="Destination folder for duplicates (optional - defaults to duplicates_review/ next to scanned folder)" onkeydown="if(event.key==='Enter') scanDirectory()">
+                <button onclick="chooseDestinationDirectory()">Choose Destination</button>
+            </div>
             <button class="scan-button" onclick="scanDirectory()" id="scanButton">Scan for Duplicates</button>
         </div>
 
@@ -356,9 +360,38 @@
             }
         }
 
+        async function chooseDestinationDirectory() {
+            showStatus('Opening destination folder picker...', 'info');
+            
+            try {
+                const response = await fetch('http://127.0.0.1:5055/api/choose-directory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.directory) {
+                    document.getElementById('destinationInput').value = data.directory;
+                    showStatus(`Destination folder selected: ${data.directory}`, 'success');
+                } else {
+                    if (data.error && data.error !== 'No directory selected') {
+                        showStatus('Error: ' + data.error, 'error');
+                    } else {
+                        showStatus('Destination selection cancelled', 'info');
+                    }
+                }
+            } catch (error) {
+                showStatus('Error opening folder picker. Please enter the path manually.', 'error');
+            }
+        }
+
         async function scanDirectory() {
             // Always read from textbox - never use cached values
             const directory = document.getElementById('directoryInput').value.trim();
+            const destination = document.getElementById('destinationInput').value.trim();
             console.log('[DEBUG] scanDirectory called with textbox value:', directory);
             
             if (!directory) {
@@ -373,12 +406,17 @@
             document.getElementById('scanButton').disabled = true;
 
             try {
+                const requestBody = { directory: directory };
+                if (destination) {
+                    requestBody.destination_folder = destination;
+                }
+
                 const response = await fetch('http://127.0.0.1:5055/api/scan', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ directory: directory })
+                    body: JSON.stringify(requestBody)
                 });
 
                 const data = await response.json();
@@ -536,8 +574,53 @@
                 nearDuplicatesDiv.innerHTML = '<div class="no-results">No near-duplicates found.</div>';
             }
 
+            // Display move summary if duplicates were moved
+            if (data.move_summary) {
+                const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'duplicate-group';
+                summaryDiv.style.background = '#e8f5e9';
+                summaryDiv.style.borderLeftColor = '#2e7d32';
+                summaryDiv.style.marginTop = '20px';
+                
+                const summaryHeader = document.createElement('div');
+                summaryHeader.className = 'group-header';
+                summaryHeader.innerHTML = `
+                    <span class="group-title">Move Summary</span>
+                `;
+                summaryDiv.appendChild(summaryHeader);
+                
+                const summaryContent = document.createElement('div');
+                summaryContent.style.padding = '10px 0';
+                summaryContent.innerHTML = `
+                    <p><strong>Number of duplicate groups:</strong> ${data.move_summary.num_duplicate_groups}</p>
+                    <p><strong>Number of files moved:</strong> ${data.move_summary.num_files_moved}</p>
+                    <p><strong>Destination folder:</strong> ${data.move_summary.destination_folder}</p>
+                `;
+                
+                if (data.move_summary.errors && data.move_summary.errors.length > 0) {
+                    const errorsDiv = document.createElement('div');
+                    errorsDiv.style.marginTop = '10px';
+                    errorsDiv.style.padding = '10px';
+                    errorsDiv.style.background = '#ffebee';
+                    errorsDiv.style.borderRadius = '4px';
+                    errorsDiv.innerHTML = `<strong>Errors (${data.move_summary.errors.length}):</strong><ul style="margin-top: 5px; padding-left: 20px;">`;
+                    data.move_summary.errors.forEach(error => {
+                        errorsDiv.innerHTML += `<li style="margin: 5px 0;">${error}</li>`;
+                    });
+                    errorsDiv.innerHTML += '</ul>';
+                    summaryContent.appendChild(errorsDiv);
+                }
+                
+                summaryDiv.appendChild(summaryContent);
+                exactDuplicatesDiv.insertBefore(summaryDiv, exactDuplicatesDiv.firstChild);
+            }
+
             resultsDiv.style.display = 'block';
-            showStatus(`Scan complete! Found ${data.total_duplicate_groups} exact duplicate groups and ${data.total_near_duplicate_groups} near-duplicate groups.`, 'success');
+            let statusMsg = `Scan complete! Found ${data.total_duplicate_groups} exact duplicate groups and ${data.total_near_duplicate_groups} near-duplicate groups.`;
+            if (data.move_summary) {
+                statusMsg += ` Moved ${data.move_summary.num_files_moved} duplicate files.`;
+            }
+            showStatus(statusMsg, 'success');
         }
 
         function showStatus(message, type) {
