@@ -177,28 +177,111 @@ def open_file():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/delete-file', methods=['POST'])
-def delete_file():
-    """Delete a file"""
+@app.route('/api/move-file', methods=['POST'])
+def move_file():
+    """Move a single file to the destination folder, preserving folder structure"""
     try:
         data = request.get_json()
         file_path = data.get('file_path')
+        destination_folder = data.get('destination_folder')
+        root_directory = data.get('root_directory')
         
         if not file_path:
             return jsonify({'error': 'No file path provided'}), 400
         
-        file_path_obj = Path(file_path)
+        if not destination_folder:
+            return jsonify({'error': 'No destination folder provided'}), 400
         
-        if not file_path_obj.exists():
+        if not root_directory:
+            return jsonify({'error': 'No root directory provided'}), 400
+        
+        source_path = Path(file_path).resolve()
+        destination_path = Path(destination_folder).resolve()
+        root_path = Path(root_directory).resolve()
+        
+        if not source_path.exists():
             return jsonify({'error': 'File does not exist'}), 404
         
-        if not file_path_obj.is_file():
+        if not source_path.is_file():
             return jsonify({'error': 'Path is not a file'}), 400
         
-        # Delete the file
-        file_path_obj.unlink()
+        # Compute relative path to preserve folder structure
+        try:
+            relative_path = source_path.relative_to(root_path)
+            destination_file_path = destination_path / relative_path
+        except ValueError:
+            # File is outside root_directory, just use filename
+            destination_file_path = destination_path / source_path.name
         
-        return jsonify({'success': True, 'message': f'File deleted: {file_path}'})
+        # Create parent directories if needed
+        destination_file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Handle filename conflicts by appending _1, _2, etc.
+        if destination_file_path.exists():
+            stem = destination_file_path.stem
+            suffix = destination_file_path.suffix
+            counter = 1
+            while destination_file_path.exists():
+                new_filename = f"{stem}_{counter}{suffix}"
+                destination_file_path = destination_file_path.parent / new_filename
+                counter += 1
+        
+        # Move the file
+        import shutil
+        shutil.move(str(source_path), str(destination_file_path))
+        
+        return jsonify({
+            'success': True, 
+            'message': f'File moved: {file_path}',
+            'destination': str(destination_file_path),
+            'original_path': str(source_path)  # Return original path for undo
+        })
+    except PermissionError as e:
+        return jsonify({'error': f'Permission denied: {str(e)}'}), 403
+    except OSError as e:
+        return jsonify({'error': f'File locked or error: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/undo-move', methods=['POST'])
+def undo_move():
+    """Undo a file move by moving it back to its original location"""
+    try:
+        data = request.get_json()
+        destination_path = data.get('destination_path')
+        original_path = data.get('original_path')
+        
+        if not destination_path:
+            return jsonify({'error': 'No destination path provided'}), 400
+        
+        if not original_path:
+            return jsonify({'error': 'No original path provided'}), 400
+        
+        dest_file = Path(destination_path).resolve()
+        orig_file = Path(original_path).resolve()
+        
+        if not dest_file.exists():
+            return jsonify({'error': 'Destination file does not exist'}), 404
+        
+        if not dest_file.is_file():
+            return jsonify({'error': 'Destination path is not a file'}), 400
+        
+        # Create parent directories for original location if needed
+        orig_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Move the file back
+        import shutil
+        shutil.move(str(dest_file), str(orig_file))
+        
+        return jsonify({
+            'success': True, 
+            'message': f'File moved back to original location: {original_path}',
+            'original_path': str(orig_file)
+        })
+    except PermissionError as e:
+        return jsonify({'error': f'Permission denied: {str(e)}'}), 403
+    except OSError as e:
+        return jsonify({'error': f'File locked or error: {str(e)}'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -248,18 +331,19 @@ def scan():
         files_data = add_duplicate_group_ids(files_data)
         files_data = add_near_duplicate_group_ids(files_data)
         
-        # Find duplicates
+        # Find exact duplicates (SHA-256 hash only, NOT near-duplicates/phash)
         duplicates = find_duplicates(files_data)
         
-        # Get destination folder from request (optional)
+        # Get destination folder from request, or use default
         destination_folder = data.get('destination_folder')
+        root_directory = str(directory_path)
         
-        # Move duplicates if any are found
-        move_results = None
-        if duplicates:
-            move_results = move_duplicates(files_data, duplicates, str(directory_path), destination_folder)
+        # If no destination folder provided, use default (duplicates_review/ next to scanned directory)
+        if not destination_folder:
+            root_path = Path(root_directory).resolve()
+            destination_folder = str(root_path.parent / 'duplicates_review')
         
-        # Format duplicates for frontend
+        # Format duplicates for frontend (only exact duplicates, no near-duplicates)
         duplicate_groups = []
         for hash_value, file_paths in duplicates.items():
             duplicate_groups.append({
@@ -268,43 +352,14 @@ def scan():
                 'count': len(file_paths)
             })
         
-        # Also find near-duplicates (perceptual hash groups)
-        near_duplicate_groups = {}
-        for file_info in files_data:
-            if file_info.get('near_duplicate_group_id') and file_info['near_duplicate_group_id'] != 'unique':
-                group_id = file_info['near_duplicate_group_id']
-                if group_id not in near_duplicate_groups:
-                    near_duplicate_groups[group_id] = []
-                near_duplicate_groups[group_id].append(file_info['file_path'])
-        
-        # Filter near-duplicate groups to only include those with multiple files
-        near_duplicate_list = []
-        for group_id, file_paths in near_duplicate_groups.items():
-            if len(file_paths) > 1:
-                near_duplicate_list.append({
-                    'group_id': group_id,
-                    'files': file_paths,
-                    'count': len(file_paths)
-                })
-        
-        # Prepare response
+        # Prepare response (only exact duplicates, no near-duplicates)
         response_data = {
             'duplicates': duplicate_groups,
-            'near_duplicates': near_duplicate_list,
             'total_files': len(files_data),
             'total_duplicate_groups': len(duplicate_groups),
-            'total_near_duplicate_groups': len(near_duplicate_list)
+            'destination_folder': destination_folder,  # Return destination for individual file moves
+            'root_directory': root_directory  # Return root directory for computing relative paths
         }
-        
-        # Add move summary if duplicates were moved
-        if move_results:
-            num_groups, num_moved, destination_path, errors = move_results
-            response_data['move_summary'] = {
-                'num_duplicate_groups': num_groups,
-                'num_files_moved': num_moved,
-                'destination_folder': str(destination_path),
-                'errors': errors
-            }
         
         return jsonify(response_data)
     

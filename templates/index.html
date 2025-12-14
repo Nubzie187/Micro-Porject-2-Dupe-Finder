@@ -47,6 +47,7 @@
             display: flex;
             gap: 10px;
             margin-bottom: 15px;
+            align-items: stretch;
         }
 
         input[type="text"] {
@@ -56,6 +57,7 @@
             border-radius: 8px;
             font-size: 16px;
             transition: border-color 0.3s;
+            min-width: 0;
         }
 
         input[type="text"]:focus {
@@ -73,6 +75,9 @@
             cursor: pointer;
             transition: background 0.3s;
             font-weight: 500;
+            white-space: nowrap;
+            min-width: 150px;
+            height: 48px;
         }
 
         button:hover {
@@ -89,6 +94,16 @@
             padding: 14px;
             font-size: 18px;
             margin-top: 10px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .button-group button {
+            flex: 1;
         }
 
         .status {
@@ -228,8 +243,8 @@
             text-decoration: underline;
         }
 
-        .delete-button {
-            background: #dc3545;
+        .move-button {
+            background: #667eea;
             color: white;
             border: none;
             padding: 6px 12px;
@@ -238,13 +253,58 @@
             font-size: 14px;
             white-space: nowrap;
             transition: background 0.2s;
+            min-width: 70px;
         }
 
-        .delete-button:hover {
-            background: #c82333;
+        .move-button:hover {
+            background: #5568d3;
         }
 
-        .delete-button:disabled {
+        .move-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .undo-button {
+            background: #ff9800;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+            transition: background 0.2s;
+            min-width: 70px;
+            margin-left: 5px;
+        }
+
+        .undo-button:hover {
+            background: #f57c00;
+        }
+
+        .undo-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .move-all-button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .move-all-button:hover {
+            background: #218838;
+        }
+
+        .move-all-button:disabled {
             background: #ccc;
             cursor: not-allowed;
         }
@@ -268,11 +328,6 @@
             margin: 30px 0 15px 0;
             padding-bottom: 10px;
             border-bottom: 2px solid #eee;
-        }
-
-        .near-duplicate-group {
-            background: #fff3e0;
-            border-left-color: #ff9800;
         }
 
     </style>
@@ -307,8 +362,11 @@
                 <div class="stats" id="stats"></div>
             </div>
 
+            <div id="moveAllContainer" style="margin-bottom: 20px; display: none;">
+                <button class="move-all-button" onclick="moveAllDuplicates()" id="moveAllButton">Move All Duplicates</button>
+            </div>
+
             <div id="exactDuplicates"></div>
-            <div id="nearDuplicates"></div>
         </div>
     </div>
 
@@ -435,20 +493,36 @@
             }
         }
 
+        // Store scan data for use when moving files
+        let scanData = null;
+
         function displayResults(data) {
             const resultsDiv = document.getElementById('results');
             const exactDuplicatesDiv = document.getElementById('exactDuplicates');
-            const nearDuplicatesDiv = document.getElementById('nearDuplicates');
             const statsDiv = document.getElementById('stats');
+
+            // Store scan data for later use when moving files
+            // Use destination from response, or fall back to input field, or use default
+            let destination = data.destination_folder || document.getElementById('destinationInput').value.trim();
+            if (!destination && data.root_directory) {
+                // Default: duplicates_review/ next to scanned directory
+                const rootPath = data.root_directory.replace(/\\/g, '/');
+                const parentPath = rootPath.substring(0, rootPath.lastIndexOf('/'));
+                destination = parentPath + '/duplicates_review';
+            }
+            
+            scanData = {
+                destination_folder: destination,
+                root_directory: data.root_directory
+            };
 
             // Clear previous results
             exactDuplicatesDiv.innerHTML = '';
-            nearDuplicatesDiv.innerHTML = '';
 
-            // Display stats
-            statsDiv.textContent = `${data.total_files} files scanned | ${data.total_duplicate_groups} exact duplicate groups | ${data.total_near_duplicate_groups} near-duplicate groups`;
+            // Display stats (only exact duplicates, no near-duplicates)
+            statsDiv.textContent = `${data.total_files} files scanned | ${data.total_duplicate_groups} duplicate groups`;
 
-            // Display exact duplicates
+            // Display exact duplicates only
             if (data.duplicates && data.duplicates.length > 0) {
                 const sectionTitle = document.createElement('h3');
                 sectionTitle.className = 'section-title';
@@ -492,16 +566,24 @@
                         
                         linkContainer.appendChild(fileLink);
                         
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.className = 'delete-button';
-                        deleteBtn.textContent = 'Delete';
-                        deleteBtn.onclick = function() {
-                            deleteFile(filePath, fileItem);
+                        const buttonContainer = document.createElement('div');
+                        buttonContainer.style.display = 'flex';
+                        buttonContainer.style.alignItems = 'center';
+                        
+                        const moveBtn = document.createElement('button');
+                        moveBtn.className = 'move-button';
+                        moveBtn.textContent = 'Move';
+                        moveBtn.onclick = function() {
+                            moveFile(filePath, fileItem, moveBtn, buttonContainer);
                         };
                         
+                        buttonContainer.appendChild(moveBtn);
                         fileItem.appendChild(linkContainer);
-                        fileItem.appendChild(deleteBtn);
+                        fileItem.appendChild(buttonContainer);
                         fileList.appendChild(fileItem);
+                        
+                        // Store original file info for potential undo
+                        fileItem.dataset.originalPath = filePath;
                     });
                     
                     groupDiv.appendChild(fileList);
@@ -511,116 +593,16 @@
                 exactDuplicatesDiv.innerHTML = '<div class="no-results">No exact duplicates found.</div>';
             }
 
-            // Display near-duplicates
-            if (data.near_duplicates && data.near_duplicates.length > 0) {
-                const sectionTitle = document.createElement('h3');
-                sectionTitle.className = 'section-title';
-                sectionTitle.textContent = 'Near Duplicates (Similar Images)';
-                nearDuplicatesDiv.appendChild(sectionTitle);
-
-                data.near_duplicates.forEach((group, index) => {
-                    const groupDiv = document.createElement('div');
-                    groupDiv.className = 'duplicate-group near-duplicate-group';
-                    
-                    const header = document.createElement('div');
-                    header.className = 'group-header';
-                    header.innerHTML = `
-                        <span class="group-title">Near-Duplicate Group ${index + 1}</span>
-                        <span class="group-count">${group.count} files</span>
-                    `;
-                    groupDiv.appendChild(header);
-
-                    const fileList = document.createElement('ul');
-                    fileList.className = 'file-list';
-                    
-                    group.files.forEach(filePath => {
-                        const fileItem = document.createElement('li');
-                        fileItem.className = 'file-item';
-                        
-                        const linkContainer = document.createElement('div');
-                        linkContainer.className = 'file-link-container';
-                        
-                        const fileLink = document.createElement('a');
-                        // Create proper file:// URL
-                        let fileUrl = createFileUrl(filePath);
-                        fileLink.href = fileUrl;
-                        fileLink.target = '_blank';
-                        fileLink.className = 'file-link';
-                        fileLink.textContent = filePath;
-                        fileLink.onclick = function(e) {
-                            e.preventDefault();
-                            // Try multiple methods to open the file
-                            openFile(filePath, fileUrl);
-                        };
-                        
-                        linkContainer.appendChild(fileLink);
-                        
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.className = 'delete-button';
-                        deleteBtn.textContent = 'Delete';
-                        deleteBtn.onclick = function() {
-                            deleteFile(filePath, fileItem);
-                        };
-                        
-                        fileItem.appendChild(linkContainer);
-                        fileItem.appendChild(deleteBtn);
-                        fileList.appendChild(fileItem);
-                    });
-                    
-                    groupDiv.appendChild(fileList);
-                    nearDuplicatesDiv.appendChild(groupDiv);
-                });
+            // Show Move All button if there are duplicates
+            const moveAllContainer = document.getElementById('moveAllContainer');
+            if (data.duplicates && data.duplicates.length > 0) {
+                moveAllContainer.style.display = 'block';
             } else {
-                nearDuplicatesDiv.innerHTML = '<div class="no-results">No near-duplicates found.</div>';
-            }
-
-            // Display move summary if duplicates were moved
-            if (data.move_summary) {
-                const summaryDiv = document.createElement('div');
-                summaryDiv.className = 'duplicate-group';
-                summaryDiv.style.background = '#e8f5e9';
-                summaryDiv.style.borderLeftColor = '#2e7d32';
-                summaryDiv.style.marginTop = '20px';
-                
-                const summaryHeader = document.createElement('div');
-                summaryHeader.className = 'group-header';
-                summaryHeader.innerHTML = `
-                    <span class="group-title">Move Summary</span>
-                `;
-                summaryDiv.appendChild(summaryHeader);
-                
-                const summaryContent = document.createElement('div');
-                summaryContent.style.padding = '10px 0';
-                summaryContent.innerHTML = `
-                    <p><strong>Number of duplicate groups:</strong> ${data.move_summary.num_duplicate_groups}</p>
-                    <p><strong>Number of files moved:</strong> ${data.move_summary.num_files_moved}</p>
-                    <p><strong>Destination folder:</strong> ${data.move_summary.destination_folder}</p>
-                `;
-                
-                if (data.move_summary.errors && data.move_summary.errors.length > 0) {
-                    const errorsDiv = document.createElement('div');
-                    errorsDiv.style.marginTop = '10px';
-                    errorsDiv.style.padding = '10px';
-                    errorsDiv.style.background = '#ffebee';
-                    errorsDiv.style.borderRadius = '4px';
-                    errorsDiv.innerHTML = `<strong>Errors (${data.move_summary.errors.length}):</strong><ul style="margin-top: 5px; padding-left: 20px;">`;
-                    data.move_summary.errors.forEach(error => {
-                        errorsDiv.innerHTML += `<li style="margin: 5px 0;">${error}</li>`;
-                    });
-                    errorsDiv.innerHTML += '</ul>';
-                    summaryContent.appendChild(errorsDiv);
-                }
-                
-                summaryDiv.appendChild(summaryContent);
-                exactDuplicatesDiv.insertBefore(summaryDiv, exactDuplicatesDiv.firstChild);
+                moveAllContainer.style.display = 'none';
             }
 
             resultsDiv.style.display = 'block';
-            let statusMsg = `Scan complete! Found ${data.total_duplicate_groups} exact duplicate groups and ${data.total_near_duplicate_groups} near-duplicate groups.`;
-            if (data.move_summary) {
-                statusMsg += ` Moved ${data.move_summary.num_files_moved} duplicate files.`;
-            }
-            showStatus(statusMsg, 'success');
+            showStatus(`Scan complete! Found ${data.total_duplicate_groups} duplicate groups. Click "Move" next to any file to move it to the destination folder.`, 'success');
         }
 
         function showStatus(message, type) {
@@ -688,47 +670,165 @@
             }
         }
 
-        async function deleteFile(filePath, fileItem) {
-            if (!confirm(`Are you sure you want to delete this file?\n\n${filePath}`)) {
+        async function moveFile(filePath, fileItem, moveBtn, buttonContainer) {
+            if (!scanData || !scanData.destination_folder) {
+                showStatus('Error: No destination folder specified. Please set a destination folder and scan again.', 'error');
                 return;
             }
             
-            const deleteBtn = fileItem.querySelector('.delete-button');
-            deleteBtn.disabled = true;
-            deleteBtn.textContent = 'Deleting...';
+            moveBtn.disabled = true;
+            moveBtn.textContent = 'Moving...';
             
             try {
-                const response = await fetch('http://127.0.0.1:5055/api/delete-file', {
+                const response = await fetch('http://127.0.0.1:5055/api/move-file', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ file_path: filePath })
+                    body: JSON.stringify({
+                        file_path: filePath,
+                        destination_folder: scanData.destination_folder,
+                        root_directory: scanData.root_directory
+                    })
                 });
                 
                 const data = await response.json();
                 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Delete failed');
+                    throw new Error(data.error || 'Move failed');
                 }
                 
-                // Remove the file item from the DOM
-                fileItem.style.opacity = '0.5';
-                fileItem.style.textDecoration = 'line-through';
-                deleteBtn.textContent = 'Deleted';
-                deleteBtn.style.background = '#28a745';
+                // Update the file item to show it was moved
+                fileItem.style.opacity = '0.7';
+                fileItem.dataset.moved = 'true';
+                fileItem.dataset.destinationPath = data.destination;
+                fileItem.dataset.originalPath = data.original_path;
                 
-                showStatus(`File deleted: ${filePath}`, 'success');
+                moveBtn.textContent = 'Moved';
+                moveBtn.style.background = '#28a745';
+                moveBtn.disabled = false;
                 
-                // Optionally remove from DOM after a delay
-                setTimeout(() => {
-                    fileItem.remove();
-                }, 2000);
+                // Add undo button
+                const undoBtn = document.createElement('button');
+                undoBtn.className = 'undo-button';
+                undoBtn.textContent = 'Undo';
+                undoBtn.onclick = function() {
+                    undoMove(fileItem, undoBtn, moveBtn);
+                };
+                buttonContainer.appendChild(undoBtn);
+                
+                showStatus(`File moved: ${filePath} → ${data.destination}`, 'success');
                 
             } catch (error) {
-                deleteBtn.disabled = false;
-                deleteBtn.textContent = 'Delete';
-                showStatus('Error deleting file: ' + error.message, 'error');
+                moveBtn.disabled = false;
+                moveBtn.textContent = 'Move';
+                showStatus('Error moving file: ' + error.message, 'error');
+            }
+        }
+
+        async function undoMove(fileItem, undoBtn, moveBtn) {
+            const destinationPath = fileItem.dataset.destinationPath;
+            const originalPath = fileItem.dataset.originalPath;
+            
+            if (!destinationPath || !originalPath) {
+                showStatus('Error: Cannot undo - move information not found', 'error');
+                return;
+            }
+            
+            undoBtn.disabled = true;
+            undoBtn.textContent = 'Undoing...';
+            
+            try {
+                const response = await fetch('http://127.0.0.1:5055/api/undo-move', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        destination_path: destinationPath,
+                        original_path: originalPath
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Undo failed');
+                }
+                
+                // Restore the file item
+                fileItem.style.opacity = '1';
+                fileItem.dataset.moved = 'false';
+                delete fileItem.dataset.destinationPath;
+                
+                moveBtn.textContent = 'Move';
+                moveBtn.style.background = '#667eea';
+                moveBtn.disabled = false;
+                
+                // Remove undo button
+                undoBtn.remove();
+                
+                showStatus(`File moved back: ${originalPath}`, 'success');
+                
+            } catch (error) {
+                undoBtn.disabled = false;
+                undoBtn.textContent = 'Undo';
+                showStatus('Error undoing move: ' + error.message, 'error');
+            }
+        }
+
+        async function moveAllDuplicates() {
+            if (!scanData || !scanData.destination_folder) {
+                showStatus('Error: No destination folder specified. Please set a destination folder and scan again.', 'error');
+                return;
+            }
+            
+            const moveAllBtn = document.getElementById('moveAllButton');
+            moveAllBtn.disabled = true;
+            moveAllBtn.textContent = 'Moving All...';
+            
+            // Find all move buttons that haven't been moved yet
+            const allMoveButtons = document.querySelectorAll('.move-button');
+            const filesToMove = [];
+            
+            allMoveButtons.forEach(btn => {
+                const fileItem = btn.closest('.file-item');
+                if (fileItem && !fileItem.dataset.moved && btn.textContent === 'Move') {
+                    const filePath = fileItem.dataset.originalPath || fileItem.querySelector('.file-link').textContent.trim();
+                    if (filePath) {
+                        const buttonContainer = btn.parentElement;
+                        filesToMove.push({ fileItem, filePath, btn, buttonContainer });
+                    }
+                }
+            });
+            
+            if (filesToMove.length === 0) {
+                showStatus('No files to move', 'info');
+                moveAllBtn.disabled = false;
+                moveAllBtn.textContent = 'Move All Duplicates';
+                return;
+            }
+            
+            let movedCount = 0;
+            let errorCount = 0;
+            
+            // Move files sequentially to avoid overwhelming the server
+            for (const { fileItem, filePath, btn, buttonContainer } of filesToMove) {
+                try {
+                    await moveFile(filePath, fileItem, btn, buttonContainer);
+                    movedCount++;
+                } catch (error) {
+                    errorCount++;
+                }
+            }
+            
+            moveAllBtn.disabled = false;
+            moveAllBtn.textContent = 'Move All Duplicates';
+            
+            if (errorCount > 0) {
+                showStatus(`Moved ${movedCount} files. ${errorCount} errors occurred.`, errorCount === filesToMove.length ? 'error' : 'info');
+            } else {
+                showStatus(`Successfully moved ${movedCount} files`, 'success');
             }
         }
     </script>

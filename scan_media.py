@@ -277,21 +277,23 @@ def scan_directory(directory_path):
 
 def find_duplicates(files_data):
     """
-    Find duplicate files based on hash.
+    Find exact duplicate files based on SHA-256 hash.
+    Only finds files with identical content (same SHA-256 hash).
+    Does NOT include near-duplicates based on perceptual hash.
     
     Args:
         files_data: List of file information dictionaries
     
     Returns:
-        Dictionary mapping hash to list of file paths
+        Dictionary mapping hash to list of file paths (only groups with 2+ files)
     """
     hash_to_files = defaultdict(list)
     
     for file_info in files_data:
-        hash_value = file_info['hash']
+        hash_value = file_info['hash']  # SHA-256 hash (exact duplicate detection)
         hash_to_files[hash_value].append(file_info['file_path'])
     
-    # Filter to only include hashes with multiple files (duplicates)
+    # Filter to only include hashes with multiple files (exact duplicates)
     duplicates = {h: paths for h, paths in hash_to_files.items() if len(paths) > 1}
     
     return duplicates
@@ -323,12 +325,16 @@ def add_duplicate_group_ids(files_data):
 
 def move_duplicates(files_data, duplicates, root_directory, destination_folder=None):
     """
-    Move duplicate files to destination folder, preserving relative folder structure.
+    Move exact duplicate files (based on SHA-256 hash) to destination folder.
+    Preserves relative folder structure when moving files.
     For each duplicate group, keeps the first file as original and moves the rest.
+    
+    IMPORTANT: Only moves exact duplicates (same SHA-256 hash).
+    Near-duplicates (similar perceptual hashes) are NOT moved by this function.
     
     Args:
         files_data: List of file information dictionaries
-        duplicates: Dictionary of duplicate groups (hash -> list of paths)
+        duplicates: Dictionary of exact duplicate groups (SHA-256 hash -> list of paths)
         root_directory: Root directory that was scanned (for computing relative paths)
         destination_folder: Destination folder path (default: duplicates_review/ next to root_directory)
     
