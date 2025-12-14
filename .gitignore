@@ -1,0 +1,35 @@
+# Media (never commit)
+Media/
+media/
+uploads/
+duplicates_review/
+near_duplicates_review/
+
+# Common media types
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.bmp
+*.tiff
+*.heic
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wmv
+
+# Python junk
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Env / secrets
+.env
+.env.local
+
+# Editor
+.vscode/
+.cursor/
